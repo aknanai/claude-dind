@@ -132,6 +132,48 @@ sudo docker compose exec -it claude claude
 sudo docker compose exec claude claude -p "What is Docker?"
 ```
 
+#### What Does "Attach" Mean?
+
+When you attach, your host terminal becomes a window into the container:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    HOST MACHINE                          │
+│                                                          │
+│  ┌──────────────────┐                                   │
+│  │  Your Terminal   │◄─── You type here                 │
+│  │  (host)          │                                   │
+│  └────────┬─────────┘                                   │
+│           │                                              │
+│           │ stdin/stdout/stderr                         │
+│           ▼                                              │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │              CLAUDE CONTAINER                     │   │
+│  │                                                   │   │
+│  │  ┌────────────────────┐                          │   │
+│  │  │  Claude Code CLI   │◄─── Runs HERE (isolated) │   │
+│  │  │  (the AI process)  │                          │   │
+│  │  └────────────────────┘                          │   │
+│  │           │                                       │   │
+│  │           │ DOCKER_HOST=tcp://dind:2375          │   │
+│  │           ▼                                       │   │
+│  │  ┌────────────────────┐                          │   │
+│  │  │  DinD Container    │◄─── Containers spawn     │   │
+│  │  │  (Docker daemon)   │     HERE, not on host    │   │
+│  │  └────────────────────┘                          │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+| Component | Where It Runs |
+|-----------|---------------|
+| Your terminal | Host machine |
+| Claude Code process | Inside container |
+| AI API calls | Container → Internet |
+| Containers Claude spawns | Inside DinD (nested) |
+
+**This is why it's safe**: Even if Claude tried something malicious, it only affects the isolated container environment, not your host system.
+
 ### Checking Container Status
 
 ```bash
