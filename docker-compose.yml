@@ -1,0 +1,47 @@
+services:
+  # Docker-in-Docker daemon - isolated from host Docker
+  dind:
+    image: docker:dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=  # Disable TLS for internal communication
+    volumes:
+      - dind-storage:/var/lib/docker  # Persist Docker images/containers
+    networks:
+      - claude-net
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Claude Code CLI container
+  claude:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude
+    privileged: true
+    environment:
+      - DOCKER_HOST=tcp://dind:2375
+    volumes:
+      - workspace:/workspace           # Persistent work directory
+      - claude-config:/root/.claude    # Persist Claude auth/config
+    depends_on:
+      dind:
+        condition: service_healthy
+    networks:
+      - claude-net
+    stdin_open: true   # Keep stdin open for interactive use
+    tty: true          # Allocate a pseudo-TTY
+
+volumes:
+  workspace:       # Claude's working directory - persists your projects
+  claude-config:   # Claude Max OAuth tokens & settings
+  dind-storage:    # Docker images/containers inside DinD
+
+networks:
+  claude-net:
+    driver: bridge
+    # Using bridge network - no access to host network
+    # Internet access is available through bridge NAT
