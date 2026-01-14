@@ -1,369 +1,168 @@
-# Claude Code Docker-in-Docker (Secure Isolated Environment)
+# Claude Code Docker-in-Docker
 
-Run Claude Code CLI in a fully isolated Docker environment with Docker-in-Docker (DinD) capabilities. Claude can spawn containers through an isolated Docker daemon - **not your host's Docker** - ensuring your host system remains protected.
+Run Claude Code CLI in an isolated Docker environment with web terminal access.
 
-## Why This Project?
+## Features
 
-When running AI coding assistants with Docker access, security is critical. This setup ensures:
-
-- **Host Docker Isolation**: Claude cannot access your host's Docker daemon
-- **Network Isolation**: Claude uses a bridge network, no direct host network access
-- **Filesystem Isolation**: Claude only sees its container filesystem + mounted volumes
-- **Nested Container Safety**: Any containers Claude spawns run inside DinD, not on your host
+- **Isolated Docker Environment**: Claude runs Docker commands inside a container (DinD), not on your host
+- **Web Terminal**: Access Claude Code via browser using ttyd
+- **Authentication**: Basic auth protection for web access
+- **Multi-session**: Multiple users can connect simultaneously with separate contexts
+- **Persistent Storage**: Projects and config survive container restarts
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                       HOST MACHINE                           │
-│                                                              │
-│  Host Docker daemon ─────────────────── NOT accessible       │
-│  Host network ───────────────────────── NOT accessible       │
-│  Host filesystem ────────────────────── NOT accessible       │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │            Docker Compose (bridge network)              │ │
-│  │                                                         │ │
-│  │  ┌─────────────────────┐    ┌───────────────────────┐  │ │
-│  │  │   claude container  │    │    dind container     │  │ │
-│  │  │                     │    │                       │  │ │
-│  │  │  • Node.js 20       │    │  • Docker daemon      │  │ │
-│  │  │  • Docker CLI       │───▶│  • Isolated storage   │  │ │
-│  │  │  • Claude Code CLI  │    │  • Spawned containers │  │ │
-│  │  │                     │    │                       │  │ │
-│  │  └─────────────────────┘    └───────────────────────┘  │ │
-│  │            │                          │                 │ │
-│  │            └────────────┬─────────────┘                 │ │
-│  │                         │                               │ │
-│  │                 [Bridge Network]                        │ │
-│  │                         │                               │ │
-│  │                     Internet                            │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Security Features
-
-| Feature | Implementation |
-|---------|----------------|
-| No host Docker access | Host's `/var/run/docker.sock` is NOT mounted |
-| No host network | Containers use isolated bridge network |
-| Isolated Docker daemon | DinD runs its own Docker daemon |
-| Container isolation | Containers spawned by Claude run inside DinD |
-| Internet via bridge | Outbound internet through NAT only |
-| Disk space safety | Pre-flight check ensures sufficient space |
-
-## Prerequisites
-
-- Linux host (tested on Kali, Debian, Ubuntu)
-- Docker Engine installed
-- Docker Compose v2+
-- 10GB+ free disk space
-- Claude Max subscription (for OAuth authentication)
-
-## Quick Start
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/YOUR_USERNAME/claude-dind.git
-cd claude-dind
-```
-
-### 2. (Optional) Configure Docker Storage
-
-If you have limited space on your root filesystem, configure Docker to use a different partition:
-
-```bash
-# Create Docker data directory on your preferred partition
-sudo mkdir -p /path/to/your/storage/docker-data
-
-# Configure Docker daemon
-sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json > /dev/null << 'EOF'
-{
-  "data-root": "/path/to/your/storage/docker-data"
-}
-EOF
-
-# Restart Docker
-sudo systemctl restart docker
-```
-
-### 3. Start the Environment
-
-```bash
-sudo ./start.sh
-```
-
-This will:
-1. Check for minimum 10GB disk space
-2. Build the Claude container image
-3. Pull the Docker-in-Docker image
-4. Start both containers
-5. Wait for DinD to be healthy
-
-### 4. Attach to Claude Code
-
-```bash
-sudo docker compose exec -it claude claude
-```
-
-### 5. Authenticate
-
-On first run, Claude Code will display a URL. Open it in your browser to authenticate with your Claude Max account. Your authentication tokens are persisted in a Docker volume.
-
-## Usage
-
-### Starting the Environment
-
-```bash
-cd claude-dind
-sudo ./start.sh
-```
-
-### Attaching to Claude Code
-
-```bash
-# Interactive Claude Code session
-sudo docker compose exec -it claude claude
-
-# Or run a single command
-sudo docker compose exec claude claude -p "What is Docker?"
-```
-
-#### What Does "Attach" Mean?
-
-When you attach, your host terminal becomes a window into the container:
-
-```
 ┌─────────────────────────────────────────────────────────┐
-│                    HOST MACHINE                          │
-│                                                          │
-│  ┌──────────────────┐                                   │
-│  │  Your Terminal   │◄─── You type here                 │
-│  │  (host)          │                                   │
-│  └────────┬─────────┘                                   │
-│           │                                              │
-│           │ stdin/stdout/stderr                         │
-│           ▼                                              │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │              CLAUDE CONTAINER                     │   │
-│  │                                                   │   │
-│  │  ┌────────────────────┐                          │   │
-│  │  │  Claude Code CLI   │◄─── Runs HERE (isolated) │   │
-│  │  │  (the AI process)  │                          │   │
-│  │  └────────────────────┘                          │   │
-│  │           │                                       │   │
-│  │           │ DOCKER_HOST=tcp://dind:2375          │   │
-│  │           ▼                                       │   │
-│  │  ┌────────────────────┐                          │   │
-│  │  │  DinD Container    │◄─── Containers spawn     │   │
-│  │  │  (Docker daemon)   │     HERE, not on host    │   │
-│  │  └────────────────────┘                          │   │
-│  └──────────────────────────────────────────────────┘   │
+│                      Host Machine                        │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │              claude-net network                     │ │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │ │
+│  │  │   dind   │  │  claude  │  │      ttyd        │  │ │
+│  │  │ (docker) │◄─│  (cli)   │  │  (web terminal)  │  │ │
+│  │  └──────────┘  └──────────┘  └──────────────────┘  │ │
+│  └────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
 
-| Component | Where It Runs |
-|-----------|---------------|
-| Your terminal | Host machine |
-| Claude Code process | Inside container |
-| AI API calls | Container → Internet |
-| Containers Claude spawns | Inside DinD (nested) |
+## Quick Start
 
-**This is why it's safe**: Even if Claude tried something malicious, it only affects the isolated container environment, not your host system.
-
-### Checking Container Status
+### 1. Clone the repository
 
 ```bash
-sudo docker compose ps
+git clone https://github.com/aknanai/claude-dind.git
+cd claude-dind
 ```
 
-### Viewing Logs
+### 2. Configure environment
 
 ```bash
-# All logs
-sudo docker compose logs -f
-
-# Just Claude container
-sudo docker compose logs -f claude
-
-# Just DinD container
-sudo docker compose logs -f dind
+cp .env.example .env
 ```
 
-### Stopping the Environment
+Edit `.env` and set your credentials:
+
+```env
+TTYD_USERNAME=your_username
+TTYD_PASSWORD=your_secure_password
+```
+
+### 3. Build and start
 
 ```bash
-sudo docker compose down
+docker build -f Dockerfile.claude -t claude-code:latest .
+docker compose up -d
 ```
 
-### Full Cleanup (removes volumes too)
+### 4. Access Claude Code
+
+Open `http://localhost:7681` in your browser and login with your credentials.
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TTYD_USERNAME` | Web terminal username | `admin` |
+| `TTYD_PASSWORD` | Web terminal password | `changeme` |
+| `TTYD_PORT` | Web terminal port | `7681` |
+| `CLAUDE_PROJECTS_PATH` | Host path for projects | `./projects` |
+| `CLAUDE_CONFIG_PATH` | Host path for Claude config | `./config` |
+
+### Synology NAS Setup
+
+For Synology, use absolute paths in your `.env`:
+
+```env
+CLAUDE_PROJECTS_PATH=/volume1/docker/claude/projects
+CLAUDE_CONFIG_PATH=/volume1/docker/claude/config
+```
+
+Create directories before starting:
 
 ```bash
-sudo docker compose down -v
+sudo mkdir -p /volume1/docker/claude/{projects,config}
 ```
 
-## Persistent Data
+### Portainer Deployment
 
-Three Docker volumes store persistent data:
+If using Portainer and `dockerfile_inline` fails:
 
-| Volume | Purpose | Path in Container |
-|--------|---------|-------------------|
-| `workspace` | Your projects and files | `/workspace` |
-| `claude-config` | Claude auth tokens & settings | `/root/.claude` |
-| `dind-storage` | Docker images/containers in DinD | `/var/lib/docker` |
+1. Build the image manually first:
+   ```bash
+   sudo docker build -f Dockerfile.claude -t claude-code:latest .
+   ```
 
-### Accessing Your Workspace
+2. Remove the `build` section from `docker-compose.yml` and keep only:
+   ```yaml
+   claude:
+     image: claude-code:latest
+   ```
 
-Files you create in `/workspace` inside the container persist across restarts:
+3. Deploy the stack in Portainer
+
+## Usage
+
+### Multiple Sessions
+
+Each browser tab/connection spawns a separate Claude session with its own context window. All sessions share:
+- Workspace files (`/workspace`)
+- Claude configuration
+- API billing
+
+### Docker Commands
+
+Claude can run Docker commands inside the isolated dind container:
 
 ```bash
-# Copy files into the workspace
-sudo docker compose cp ./myproject claude:/workspace/
-
-# Copy files out of the workspace
-sudo docker compose cp claude:/workspace/myproject ./
+docker ps        # List containers (inside dind, not host)
+docker build     # Build images
+docker run       # Run containers
 ```
 
-## Verifying Security
+## Security
 
-### Test 1: Host Docker Socket Not Accessible
-
-```bash
-sudo docker compose exec claude ls -la /var/run/docker.sock
-# Should return: "No such file or directory"
-```
-
-### Test 2: Claude Uses DinD Docker
-
-```bash
-sudo docker compose exec claude docker info | grep -i "name"
-# Should show DinD's Docker, not host's
-```
-
-### Test 3: Containers Spawn Inside DinD
-
-```bash
-# From Claude container, run a container
-sudo docker compose exec claude docker run --rm alpine echo "Hello from DinD!"
-
-# Verify it's NOT visible on host
-docker ps -a | grep alpine
-# Should return nothing (container ran inside DinD)
-```
-
-### Test 4: Internet Access Works
-
-```bash
-sudo docker compose exec claude curl -s -o /dev/null -w "%{http_code}" https://google.com
-# Should return: 200
-```
+- Web terminal protected by basic authentication
+- Docker commands run in isolated dind container
+- Host Docker daemon is not accessible from Claude
+- Credentials stored in `.env` (not committed to git)
 
 ## Troubleshooting
 
-### "Insufficient disk space" Error
+### "execvp failed: no such file or directory"
 
-The start script requires 10GB free. Either free up space or modify `MIN_SPACE_GB` in `start.sh`.
-
-### DinD Container Not Healthy
-
-Check DinD logs:
-```bash
-sudo docker compose logs dind
-```
-
-Common causes:
-- Kernel doesn't support required features
-- Storage driver issues
-
-### Claude Can't Connect to DinD
-
-Verify DinD is running and healthy:
-```bash
-sudo docker compose ps
-```
-
-The `dind` service should show `(healthy)` status.
-
-### Authentication Issues
-
-If authentication fails or expires:
-```bash
-# Remove Claude config volume and re-authenticate
-sudo docker compose down
-docker volume rm claude-dind_claude-config
-sudo ./start.sh
-```
-
-## Customization
-
-### Change Workspace Location
-
-To bind-mount a host directory instead of using a volume, edit `docker-compose.yml`:
+The ttyd container needs the Docker binary mounted. Ensure this volume is in the compose file:
 
 ```yaml
 volumes:
-  - /path/on/host:/workspace  # Instead of: workspace:/workspace
+  - /usr/local/bin/docker:/usr/local/bin/docker:ro
 ```
 
-### Add Environment Variables
+### "Bind mount failed: path does not exist"
 
-Edit `docker-compose.yml` to add variables to the Claude container:
+Create the required directories:
+
+```bash
+mkdir -p ./projects ./config
+# Or for Synology:
+sudo mkdir -p /volume1/docker/claude/{projects,config}
+```
+
+### Network conflicts
+
+If you get network overlap errors, add explicit IPAM config:
 
 ```yaml
-claude:
-  environment:
-    - DOCKER_HOST=tcp://dind:2375
-    - MY_CUSTOM_VAR=value
+networks:
+  claude-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.44.0.0/24
+          gateway: 172.44.0.1
 ```
-
-### Use API Key Instead of OAuth
-
-If using an API key instead of Claude Max:
-
-```yaml
-claude:
-  environment:
-    - DOCKER_HOST=tcp://dind:2375
-    - ANTHROPIC_API_KEY=your-api-key-here
-```
-
-## File Structure
-
-```
-claude-dind/
-├── docker-compose.yml    # Container orchestration
-├── Dockerfile.claude     # Claude container build instructions
-├── start.sh              # Startup script with disk check
-└── README.md             # This file
-```
-
-## How It Works
-
-1. **DinD Container**: Runs a full Docker daemon inside a container. This daemon is completely separate from your host's Docker.
-
-2. **Claude Container**: Runs Claude Code CLI with Docker CLI installed. The `DOCKER_HOST` environment variable points to the DinD container, so all Docker commands go to DinD, not your host.
-
-3. **Bridge Network**: Both containers share an isolated bridge network. They can communicate with each other and reach the internet, but cannot access your host network directly.
-
-4. **Privileged Mode**: Both containers run with `--privileged` flag, which is required for DinD to function. However, this privilege is contained within the Docker isolation layer.
 
 ## License
 
-MIT License - See LICENSE file for details.
-
-## Contributing
-
-Contributions welcome! Please open an issue or PR.
-
-## Security Considerations
-
-While this setup provides strong isolation, keep in mind:
-
-- The `--privileged` flag grants elevated capabilities within the container
-- DinD containers have known limitations compared to native Docker
-- For production/enterprise use, consider additional hardening (SELinux, AppArmor, user namespaces)
-
-This project is designed for development and experimentation where you want to give Claude Code Docker access without risking your host system.
+MIT

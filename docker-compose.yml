@@ -1,12 +1,11 @@
 services:
-  # Docker-in-Docker daemon - isolated from host Docker
   dind:
     image: docker:dind
     privileged: true
     environment:
-      - DOCKER_TLS_CERTDIR=  # Disable TLS for internal communication
+      - DOCKER_TLS_CERTDIR=
     volumes:
-      - dind-storage:/var/lib/docker  # Persist Docker images/containers
+      - dind-storage:/var/lib/docker
     networks:
       - claude-net
     healthcheck:
@@ -16,32 +15,43 @@ services:
       retries: 5
       start_period: 30s
 
-  # Claude Code CLI container
   claude:
     build:
       context: .
       dockerfile: Dockerfile.claude
+    image: claude-code:latest
     privileged: true
     environment:
       - DOCKER_HOST=tcp://dind:2375
     volumes:
-      - workspace:/workspace           # Persistent work directory
-      - claude-config:/root/.claude    # Persist Claude auth/config
+      - ${CLAUDE_PROJECTS_PATH:-./projects}:/workspace
+      - ${CLAUDE_CONFIG_PATH:-./config}:/root/.claude
     depends_on:
       dind:
         condition: service_healthy
     networks:
       - claude-net
-    stdin_open: true   # Keep stdin open for interactive use
-    tty: true          # Allocate a pseudo-TTY
+    stdin_open: true
+    tty: true
+
+  ttyd:
+    image: tsl0922/ttyd:alpine
+    container_name: claude-web
+    command: ["ttyd", "-W", "-p", "7681", "-t", "fontSize=14", "-c", "${TTYD_USERNAME:-admin}:${TTYD_PASSWORD:-changeme}", "/usr/local/bin/docker", "exec", "-it", "claude-dind-claude-1", "claude"]
+    ports:
+      - "${TTYD_PORT:-7681}:7681"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/local/bin/docker:/usr/local/bin/docker:ro
+    depends_on:
+      - claude
+    networks:
+      - claude-net
+    restart: unless-stopped
 
 volumes:
-  workspace:       # Claude's working directory - persists your projects
-  claude-config:   # Claude Max OAuth tokens & settings
-  dind-storage:    # Docker images/containers inside DinD
+  dind-storage:
 
 networks:
   claude-net:
     driver: bridge
-    # Using bridge network - no access to host network
-    # Internet access is available through bridge NAT
